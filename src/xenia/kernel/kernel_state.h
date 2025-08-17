@@ -226,6 +226,7 @@ class KernelState {
   bool RegisterUserModule(object_ref<UserModule> module);
   void UnregisterUserModule(UserModule* module);
   bool IsKernelModule(const std::string_view name);
+  bool IsModuleLoaded(const std::string_view name);
   object_ref<XModule> GetModule(const std::string_view name,
                                 bool user_only = false);
 
@@ -357,6 +358,7 @@ class KernelState {
   std::unordered_map<uint32_t, XThread*> threads_by_id_;
   std::vector<object_ref<XNotifyListener>> notify_listeners_;
   bool has_notified_startup_ = false;
+  bool has_notified_live_startup_ = false;
 
   object_ref<UserModule> executable_module_;
   std::vector<object_ref<KernelModule>> kernel_modules_;
