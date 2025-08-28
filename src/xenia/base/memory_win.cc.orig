@@ -193,6 +193,7 @@ bool QueryProtect(void* base_address, size_t& length, PageAccess& access_out) {
 #if XE_USE_NTDLL_FUNCTIONS == 1
   ULONG_PTR ResultLength;
 
+<<<<<<< HEAD
   NTSTATUS query_result = NtQueryVirtualMemoryPointer.invoke<NTSTATUS>(
       (HANDLE)0xFFFFFFFFFFFFFFFFLL, (PVOID)base_address,
       0 /* MemoryBasicInformation*/, &info, length, &ResultLength);
