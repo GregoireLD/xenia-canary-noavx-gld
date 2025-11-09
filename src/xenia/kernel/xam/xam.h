@@ -99,7 +99,7 @@ struct X_XAMACCOUNTINFO {
   }
 
   std::string GetGamertagString() const {
-    return xe::to_utf8(std::u16string(gamertag));
+    return xe::to_utf8(xe::string_util::read_u16string_and_swap(gamertag));
   }
 
   void ToggleLiveFlag(bool is_live) {
@@ -199,6 +199,11 @@ struct X_DASH_APP_INFO {
 };
 static_assert_size(X_DASH_APP_INFO, 0xC);
 
+struct X_DASH_BACKSTACK_DATA {
+  uint8_t unk1[0x314];
+};
+static_assert_size(X_DASH_BACKSTACK_DATA, 0x314);
+
 struct X_GUID {
   xe::be<uint32_t> Data1;
   xe::be<uint16_t> Data2;
@@ -277,6 +282,20 @@ enum class SigninUiFlags : uint32_t {
     - xbox live controls in family settings
   */
 };
+
+struct X_PROFILE_CREATION_INFO {
+  uint32_t flags;
+  uint32_t device_id;
+  X_XAMACCOUNTINFO account_info;
+  X_USER_PAYMENT_INFO user_payment_info;
+  uint32_t unk;
+  uint64_t offline_xuid;
+  X_PASSPORT_SESSION_TOKEN user_token;
+  X_PASSPORT_SESSION_TOKEN owner_token;
+  uint32_t task_handle_ptr;
+  uint32_t profile_creation_ptr;
+};
+static_assert_size(X_PROFILE_CREATION_INFO, 0xAC0);
 
 enum class UserLogonFlags : uint32_t {
   OfflineOnly = 0x00000001,

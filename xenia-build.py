@@ -49,28 +49,41 @@ def import_subprocess_environment(args):
     popen = subprocess.Popen(
         args, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     variables, _ = popen.communicate()
-    envvars_to_save = (
-        "devenvdir",
-        "include",
-        "lib",
-        "libpath",
-        "path",
-        "pathext",
-        "systemroot",
-        "temp",
-        "tmp",
-        "vcinstalldir",
-        "windowssdkdir",
-        )
-    for line in variables.splitlines():
-        for envvar in envvars_to_save:
-            if f"{envvar}=" in line.lower():
-                var, setting = line.split("=", 1)
-                if envvar == "path":
-                    setting = f"{os.path.dirname(sys.executable)}{os.pathsep}{setting}"
-                os.environ[var.upper()] = setting
-                break
 
+    envvars_to_save = (
+        "DEVENVDIR",
+        "INCLUDE",
+        "LIB",
+        "LIBPATH",
+        "PATH",
+        "PATHEXT",
+        "SYSTEMROOT",
+        "TEMP",
+        "TMP",
+        "VCINSTALLDIR",
+        "WindowsSdkDir",
+        "PROGRAMFILES",
+        "ProgramFiles(x86)",
+        "VULKAN_SDK"
+        "CC",
+        "CXX",
+        )
+
+    # Extract and parse environment variables from stdout
+    for line in variables.splitlines():
+        if line.find("=") != -1:
+            for envvar in envvars_to_save:
+                var, setting = line.split("=", 1)
+
+                var = var.upper()
+                envvar = envvar.upper()
+
+                if envvar == var:
+                    if envvar == "PATH":
+                        setting = f"{os.path.dirname(sys.executable)}{os.pathsep}{setting}"
+
+                    os.environ[var] = setting
+                    break
 
 VSVERSION_MINIMUM = 2022
 def import_vs_environment():
@@ -268,22 +281,12 @@ def generate_version_h():
     """
     header_file = "build/version.h"
     pr_number = None
-    pr_repo_name = ""
-    pr_branch_name = ""
-    pr_commit = ""
-    pr_commit_short = ""
-    #if os.getenv("APPVEYOR") == "True":
-    #  branch_name = os.getenv("APPVEYOR_REPO_BRANCH")
-    #  commit = os.getenv("APPVEYOR_REPO_COMMIT")
-    #  commit_short = commit[:9]
-    #  pr_number = os.getenv("APPVEYOR_PULL_REQUEST_NUMBER")
-    #  else:
-    #    pr_repo_name = os.getenv("APPVEYOR_PULL_REQUEST_HEAD_REPO_NAME")
-    #    pr_branch_name = os.getenv("APPVEYOR_PULL_REQUEST_HEAD_REPO_BRANCH")
-    #    pr_commit = os.getenv("APPVEYOR_PULL_REQUEST_HEAD_COMMIT")
-    #    pr_commit_short = pr_commit[:9]
+
     if git_is_repository():
         (branch_name, commit, commit_short) = git_get_head_info()
+
+        if is_pull_request():
+            pr_number = get_pr_number()
     else:
         branch_name = "tarball"
         commit = ":(-dont-do-this"
@@ -303,10 +306,6 @@ def generate_version_h():
     if pr_number:
       contents_new += f"""#define XE_BUILD_IS_PR
 #define XE_BUILD_PR_NUMBER "{pr_number}"
-#define XE_BUILD_PR_REPO "{pr_repo_name}"
-#define XE_BUILD_PR_BRANCH "{pr_branch_name}"
-#define XE_BUILD_PR_COMMIT "{pr_commit}"
-#define XE_BUILD_PR_COMMIT_SHORT "{pr_commit_short}"
 """
 
     # footer
@@ -411,7 +410,20 @@ def git_is_repository():
         "--is-inside-work-tree",
         ], throw_on_error=False, stdout_path=os.devnull, stderr_path=os.devnull) == 0
 
+def is_pull_request():
+    """Returns true if actions is building a pull request, otherwise false.
+    """
+    return os.getenv('GITHUB_EVENT_NAME') == 'pull_request'
 
+def get_pr_number():
+    """
+    Returns the pull request number if the workflow is triggered by a PR, otherwise None.
+    """
+    github_ref = os.getenv('GITHUB_REF')
+    
+    if github_ref and github_ref.startswith('refs/pull/'):
+        return github_ref.split('/')[2]
+    
 def git_submodule_update():
     """Runs a git submodule init and update.
     """
@@ -461,7 +473,7 @@ def get_clang_format_binary():
             if int(clang_format_out.split("version ")[1].split(".")[0]) == int(clang_format_version_req):
                 print(clang_format_out)
                 return binary
-    print(f"ERROR: clang-format {clang_format_version_req} is not on PATH")
+    print(f"{bcolors.FAIL}ERROR: clang-format {clang_format_version_req} is not on PATH{bcolors.ENDC}")
     sys.exit(1)
 
 
@@ -486,7 +498,7 @@ def get_premake_target_os(target_os_override=None):
         target_os = "android"
     else:
         target_os = "linux"
-    if target_os_override is not None and target_os_override != target_os:
+    if target_os_override and target_os_override != target_os:
         if target_os_override == "android":
             target_os = target_os_override
         else:
@@ -832,7 +844,7 @@ class BaseBuildCommand(Command):
                     "/m",
                     "/v:m",
                     f"/p:Configuration={args['config']}",
-                    ] + ([targets] if targets is not None else []) + pass_args)
+                    ] + ([targets] if targets else []) + pass_args)
         elif sys.platform == "darwin":
             schemes = args["target"] or ["xenia-app"]
             nested_args = [["-scheme", scheme] for scheme in schemes]

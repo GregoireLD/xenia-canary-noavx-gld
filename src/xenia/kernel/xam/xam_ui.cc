@@ -54,9 +54,6 @@ namespace xam {
 //
 // We deliberately delay the XN_SYS_UI = false notification to give games time
 // to create a listener (if they're insane enough do this).
-
-extern std::atomic<int> xam_dialogs_shown_;
-
 template <typename T>
 X_RESULT xeXamDispatchDialog(T* dialog,
                              std::function<X_RESULT(T*)> close_callback,
@@ -74,9 +71,9 @@ X_RESULT xeXamDispatchDialog(T* dialog,
         kernel_state()->emulator()->display_window()->app_context();
     if (app_context.CallInUIThreadSynchronous(
             [&dialog, &fence]() { dialog->Then(&fence); })) {
-      ++xam_dialogs_shown_;
+      kernel_state()->xam_state()->xam_dialogs_shown_++;
       fence.Wait();
-      --xam_dialogs_shown_;
+      kernel_state()->xam_state()->xam_dialogs_shown_--;
     } else {
       delete dialog;
     }
@@ -116,9 +113,9 @@ X_RESULT xeXamDispatchDialogEx(
     xe::threading::Fence fence;
     if (display_window->app_context().CallInUIThreadSynchronous(
             [&dialog, &fence]() { dialog->Then(&fence); })) {
-      ++xam_dialogs_shown_;
+      kernel_state()->xam_state()->xam_dialogs_shown_++;
       fence.Wait();
-      --xam_dialogs_shown_;
+      kernel_state()->xam_state()->xam_dialogs_shown_--;
     } else {
       delete dialog;
     }
@@ -191,15 +188,14 @@ template <typename T>
 X_RESULT xeXamDispatchDialogAsync(T* dialog,
                                   std::function<void(T*)> close_callback) {
   kernel_state()->BroadcastNotification(kXNotificationSystemUI, true);
-  ++xam_dialogs_shown_;
-
+  kernel_state()->xam_state()->xam_dialogs_shown_++;
   // Important to pass captured vars by value here since we return from this
   // without waiting for the dialog to close so the original local vars will be
   // destroyed.
   dialog->set_close_callback([dialog, close_callback]() {
     close_callback(dialog);
 
-    --xam_dialogs_shown_;
+    kernel_state()->xam_state()->xam_dialogs_shown_--;
 
     auto run = []() -> void {
       xe::threading::Sleep(std::chrono::milliseconds(100));
@@ -215,13 +211,13 @@ X_RESULT xeXamDispatchDialogAsync(T* dialog,
 
 X_RESULT xeXamDispatchHeadlessAsync(std::function<void()> run_callback) {
   kernel_state()->BroadcastNotification(kXNotificationSystemUI, true);
-  ++xam_dialogs_shown_;
+  kernel_state()->xam_state()->xam_dialogs_shown_++;
 
   auto display_window = kernel_state()->emulator()->display_window();
   display_window->app_context().CallInUIThread([run_callback]() {
     run_callback();
 
-    --xam_dialogs_shown_;
+    kernel_state()->xam_state()->xam_dialogs_shown_--;
 
     auto run = []() -> void {
       xe::threading::Sleep(std::chrono::milliseconds(100));
@@ -393,7 +389,9 @@ static dword_result_t XamShowMessageBoxUi(
   return result;
 }
 
-dword_result_t XamIsUIActive_entry() { return xeXamIsUIActive(); }
+dword_result_t XamIsUIActive_entry() {
+  return kernel_state()->xam_state()->xam_dialogs_shown_ > 0;
+}
 DECLARE_XAM_EXPORT2(XamIsUIActive, kUI, kImplemented, kHighFrequency);
 
 // https://www.se7ensins.com/forums/threads/working-xshowmessageboxui.844116/
@@ -518,13 +516,6 @@ dword_result_t XamShowDeviceSelectorUI_entry(
       (content_flags & 0x83F00008) != 0 || !device_id_ptr) {
     XOverlappedSetExtendedError(overlapped, X_ERROR_INVALID_PARAMETER);
     return X_ERROR_INVALID_PARAMETER;
-  }
-
-  if (user_index != XUserIndexAny &&
-      !kernel_state()->xam_state()->IsUserSignedIn(user_index)) {
-    kernel_state()->CompleteOverlappedImmediate(overlapped,
-                                                X_ERROR_NO_SUCH_USER);
-    return X_ERROR_IO_PENDING;
   }
 
   std::vector<const DummyDeviceInfo*> devices = ListStorageDevices();
@@ -893,6 +884,7 @@ bool xeDrawProfileContent(xe::ui::ImGuiDrawer* imgui_drawer,
                           ImGuiSelectableFlags_SpanAllColumns,
                           end_draw_position)) {
       *selected_xuid = xuid;
+      ImGui::OpenPopup("Profile Menu");
     }
 
     if (context_menu) {

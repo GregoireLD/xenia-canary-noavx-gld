@@ -279,10 +279,7 @@ X_STATUS Emulator::Setup(
   if (input_driver_factory) {
     auto input_drivers = input_driver_factory(display_window_);
     for (size_t i = 0; i < input_drivers.size(); ++i) {
-      auto& input_driver = input_drivers[i];
-      input_driver->set_is_active_callback(
-          []() -> bool { return !xe::kernel::xam::xeXamIsUIActive(); });
-      input_system_->AddDriver(std::move(input_driver));
+      input_system_->AddDriver(std::move(input_drivers[i]));
     }
   }
 
@@ -290,6 +287,9 @@ X_STATUS Emulator::Setup(
   if (result) {
     return result;
   }
+
+  // Add inputSystem to UI
+  imgui_drawer_->LoadInputSystem(input_system_.get());
 
   XELOGI("{}: Initializing VFS...", __func__);
   // Bring up the virtual filesystem used by the kernel.
@@ -580,15 +580,15 @@ X_STATUS Emulator::LaunchXexFile(const std::filesystem::path& path) {
     return result;
   }
 
-  const std::string mount_path = xe::path_to_utf8(
-      std::filesystem::path(kernel_state_->GetExecutableModule()->path())
-          .parent_path());
+  const std::string mount_path =
+      utf8::find_base_guest_path(kernel_state_->GetExecutableModule()->path());
 
   // System related symlinks
   file_system_->RegisterSymbolicLink("media:", mount_path);
   file_system_->RegisterSymbolicLink("font:", mount_path);
 
   auto module = kernel_state_->LoadUserModule("xam.xex");
+
   if (!module) {
     module = kernel_state_->LoadUserModule("$flash_xam.xex");
   }
@@ -596,6 +596,7 @@ X_STATUS Emulator::LaunchXexFile(const std::filesystem::path& path) {
   if (module) {
     result = kernel_state_->FinishLoadingUserModule(module, false);
   }
+
   return result;
 }
 
@@ -1524,14 +1525,18 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       // Show achievments data
       tabulate::Table table;
       table.format().multi_byte_characters(true);
-      table.add_row({"ID", "Title", "Description", "Gamerscore"});
+      table.add_row({"ID", "Title", "Description", "Type", "Gamerscore"});
 
       const std::vector<kernel::util::GameInfoDatabase::Achievement>
           achievement_list = game_info_database_->GetAchievements();
       for (const kernel::util::GameInfoDatabase::Achievement& entry :
            achievement_list) {
+        const std::string type = GetAchievementTypeName(
+            kernel::xam::GetAchievementType(entry.flags));
+
         table.add_row({fmt::format("{}", entry.id), entry.label,
-                       entry.description, fmt::format("{}", entry.gamerscore)});
+                       entry.description, type,
+                       fmt::format("{}", entry.gamerscore)});
       }
       XELOGI("-------------------- ACHIEVEMENTS --------------------\n{}",
              table.str());

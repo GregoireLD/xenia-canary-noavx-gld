@@ -19,6 +19,8 @@
 
 DECLARE_bool(debug);
 
+DECLARE_bool(force_mount_devkit);
+
 namespace xe {
 namespace kernel {
 namespace xbdm {
@@ -109,7 +111,7 @@ dword_result_t DmCaptureStackBackTrace_entry(dword_t frames_to_capture,
 
   return XBDM_SUCCESSFUL;
 }
-DECLARE_XBDM_EXPORT1(DmCaptureStackBackTrace, kDebug, kStub);
+DECLARE_XBDM_EXPORT2(DmCaptureStackBackTrace, kDebug, kStub, kHighFrequency);
 
 dword_result_t DmWalkLoadedModules_entry(
     lpdword_t walk_modules_ptr, pointer_t<DMN_MODULE_LOAD> module_load_ptr) {
@@ -130,6 +132,10 @@ dword_result_t DmCloseLoadedModules_entry(lpdword_t walk_modules_ptr) {
 DECLARE_XBDM_EXPORT1(DmCloseLoadedModules, kDebug, kStub);
 
 dword_result_t DmMapDevkitDrive_entry(const ppc_context_t& ctx) {
+  if (cvars::force_mount_devkit) {
+    return 0;
+  }
+
   auto devkit_device =
       std::make_unique<xe::vfs::HostPathDevice>("\\DEVKIT", "devkit", false);
 
@@ -461,6 +467,23 @@ DECLARE_XBDM_EXPORT1(DmSetDumpMode, kDebug, kStub);
 
 dword_result_t DmIsFastCAPEnabled_entry() { return XBDM_UNSUCCESSFUL; }
 DECLARE_XBDM_EXPORT1(DmIsFastCAPEnabled, kDebug, kStub);
+
+dword_result_t DmPMCInstallAndStart_entry(dword_t group_setup) {
+  // Not initialized, so let's initialize it
+  if (kernel_state()->xbdm_counters_address[0] == 0) {
+    kernel_state()->InitializeXbdmCpuCounters();
+  }
+  return XBDM_SUCCESSFUL;
+}
+DECLARE_XBDM_EXPORT1(DmPMCInstallAndStart, kDebug, kSketchy);
+
+dword_result_t DmPMCGetCounterName_entry(dword_t counter_id) {
+  // This returns pointer to already preallocated string with counter names.
+  // We should make allocation somewhere during xbdm initialization once
+  return kernel_state()->xbdm_counters_address
+      [counter_id < 0x10 ? static_cast<uint32_t>(counter_id) : 0x10];
+}
+DECLARE_XBDM_EXPORT1(DmPMCGetCounterName, kDebug, kSketchy);
 
 void __CAP_Start_Profiling_entry(dword_t a1, dword_t a2) {}
 

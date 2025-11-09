@@ -107,6 +107,10 @@ dword_result_t XamInputGetState_entry(dword_t user_index, dword_t flags,
     return X_ERROR_DEVICE_NOT_CONNECTED;
   }
 
+  if (kernel_state()->xam_state()->xam_dialogs_shown_ > 0) {
+    return X_ERROR_SUCCESS;
+  }
+
   // Games call this with a NULL state ptr, probably as a query.
 
   uint32_t actual_user_index = user_index;
@@ -176,6 +180,10 @@ dword_result_t XamInputGetKeystrokeEx_entry(
   }
 
   keystroke.Zero();
+
+  if (kernel_state()->xam_state()->xam_dialogs_shown_ > 0) {
+    return X_ERROR_SUCCESS;
+  }
 
   uint32_t user_index = *user_index_ptr;
   auto input_system = kernel_state()->emulator()->input_system();

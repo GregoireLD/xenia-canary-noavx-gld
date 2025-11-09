@@ -71,9 +71,9 @@ jobs:
         with:
           fetch-depth: 0
       - name: Setup
-        run: python xenia-build.py setup
+        run: git submodule update --init --depth=1 -j $env:NUMBER_OF_PROCESSORS (Select-String -CaseSensitive '(?<=path = )(?!third_party\/(FidelityFX-(CAS|FSR)|premake-(androidndk|cmake|export-compile-commands))).+' .gitmodules).Matches.Value
       - name: Build
-        run: python xenia-build.py build --no_premake --config=Release --target=src\xenia-app
+        run: python xenia-build.py build --config=Release --target=src\xenia-app
       - name: Prepare artifacts
         run: |
           foreach ($file in 'build\bin\${{ runner.os }}\Release\xenia_canary.exe','build\bin\${{ runner.os }}\Release\xenia_canary.pdb') {

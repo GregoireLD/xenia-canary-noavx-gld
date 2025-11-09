@@ -255,22 +255,28 @@ uint32_t XamUserReadProfileSettingsEx(uint32_t title_id, uint32_t user_index,
   }
 
   auto run = [=](uint32_t& extended_error, uint32_t& length) {
+    extended_error = 0;
+    length = 0;
+
     auto user_profile = kernel_state()->xam_state()->GetUserProfile(user_index);
 
     if (!user_profile && !xuids) {
-      return X_ERROR_NO_SUCH_USER;
+      extended_error = X_E_NO_SUCH_USER;
+      return X_ERROR_FUNCTION_FAILED;
     }
 
     if (xuids) {
       uint64_t user_xuid = static_cast<uint64_t>(xuids[0]);
       if (!kernel_state()->xam_state()->IsUserSignedIn(user_xuid)) {
-        return X_ERROR_NO_SUCH_USER;
+        extended_error = X_E_NO_SUCH_USER;
+        return X_ERROR_FUNCTION_FAILED;
       }
       user_profile = kernel_state()->xam_state()->GetUserProfile(user_xuid);
     }
 
     if (!user_profile) {
-      return X_ERROR_NO_SUCH_USER;
+      extended_error = X_E_NO_SUCH_USER;
+      return X_ERROR_FUNCTION_FAILED;
     }
 
     auto out_header = reinterpret_cast<X_USER_READ_PROFILE_SETTINGS*>(buffer);
@@ -451,6 +457,7 @@ dword_result_t XamUserContentRestrictionCheckAccess_entry(
     // TODO(benvanik): does this need the access arg on it?
     kernel_state()->CompleteOverlappedImmediate(overlapped_ptr,
                                                 X_ERROR_SUCCESS);
+    return X_ERROR_IO_PENDING;
   }
 
   return X_ERROR_SUCCESS;
@@ -747,17 +754,17 @@ dword_result_t XamParseGamerTileKey_entry(pointer_t<X_USER_DATA> key_ptr,
     return X_ERROR_INVALID_PARAMETER;
   }
 
-  std::string tile_key = xe::to_utf8(string_util::read_u16string_and_swap(
+  const std::string tile_key = xe::to_utf8(string_util::read_u16string_and_swap(
       kernel_memory()->TranslateVirtual<const char16_t*>(
           key_ptr->data.unicode.ptr)));
 
   // Default key size is 24 bytes, but we need to include null terminator
-  if (tile_key.empty() || tile_key.size() != 25) {
+  if (tile_key.empty() || tile_key.size() != 24) {
     return X_ERROR_INVALID_PARAMETER;
   }
 
   const bool is_valid_hex_string =
-      std::all_of(tile_key.begin(), --tile_key.end(),
+      std::all_of(tile_key.cbegin(), tile_key.cend(),
                   [](unsigned char c) { return std::isxdigit(c); });
 
   if (!is_valid_hex_string) {
@@ -780,6 +787,16 @@ dword_result_t XamParseGamerTileKey_entry(pointer_t<X_USER_DATA> key_ptr,
   if (small_tile_id_ptr) {
     *small_tile_id_ptr =
         string_util::from_string<uint32_t>(small_tile_id, true);
+  }
+
+  bool is_from_dash = false;
+  bool is_avatar = false;
+  bool is_custom = false;
+
+  if (title_id_ptr) {
+    is_from_dash = IsGamerPictureFromDash(*title_id_ptr);
+    is_avatar = IsGamerPictureAvatar(*title_id_ptr);
+    is_custom = IsGamerPictureCustom(*title_id_ptr);
   }
 
   return X_ERROR_SUCCESS;
@@ -1057,6 +1074,95 @@ dword_result_t XamUserGetUserTenure_entry(dword_t user_index,
   return X_ERROR_SUCCESS;
 }
 DECLARE_XAM_EXPORT1(XamUserGetUserTenure, kUserProfiles, kImplemented);
+
+// https://github.com/TeaModz/XeLiveStealth-Full-Source/blob/d4a7439ac6241c4a13e883a6f156623d1c08f6eb/XeLive/Utils.cpp#L416
+dword_result_t XamUserLogon_entry(lpqword_t xuids_ptr, dword_t flags,
+                                  pointer_t<XAM_OVERLAPPED> overlapped_ptr) {
+  const auto host_xuids_ptr =
+      kernel_memory()->TranslateVirtual<xe::be<uint64_t>*>(xuids_ptr);
+
+  const auto xuids = std::vector<xe::be<uint64_t>>(
+      host_xuids_ptr, host_xuids_ptr + XUserMaxUserCount);
+
+  if (!xuids_ptr) {
+    return X_ERROR_INVALID_PARAMETER;
+  }
+
+  auto run = [xuids, flags](uint32_t& extended_error,
+                            uint32_t& length) -> X_RESULT {
+    auto const profile_manager = kernel_state()->xam_state()->profile_manager();
+
+    X_STATUS result = X_ERROR_SUCCESS;
+
+    if (flags & static_cast<uint32_t>(UserLogonFlags::AddUser)) {
+      for (auto& xuid : xuids) {
+        if (xuid) {
+          profile_manager->Login(xuid, XUserIndexAny, true);
+        }
+      }
+    }
+
+    if (flags & static_cast<uint32_t>(UserLogonFlags::RemoveUser)) {
+      for (auto& xuid : xuids) {
+        const uint8_t assigned_index =
+            profile_manager->GetUserIndexAssignedToProfile(xuid);
+
+        if (xuid) {
+          if (kernel_state()->xam_state()->IsUserSignedIn(xuid)) {
+            profile_manager->Logout(assigned_index, true);
+          }
+        }
+      }
+    }
+
+    // Log everyone out
+    if (flags & static_cast<uint32_t>(UserLogonFlags::ForceLiveLogOff)) {
+      for (uint32_t user_index = 0; user_index < XUserMaxUserCount;
+           user_index++) {
+        if (kernel_state()->xam_state()->IsUserSignedIn(user_index)) {
+          profile_manager->Logout(user_index, true);
+        }
+      }
+    }
+
+    extended_error = X_HRESULT_FROM_WIN32(result);
+    length = 0;
+
+    return result;
+  };
+
+  if (!overlapped_ptr) {
+    uint32_t extended_error, length = 0;
+    return run(extended_error, length);
+  } else {
+    kernel_state()->CompleteOverlappedDeferredEx(run, overlapped_ptr);
+    return X_ERROR_IO_PENDING;
+  }
+}
+DECLARE_XAM_EXPORT1(XamUserLogon, kUserProfiles, kImplemented);
+
+dword_result_t XamUserLogonEx_entry(pointer_t<X_PROFILEENUMRESULT> profile_ptr,
+                                    dword_t flags,
+                                    pointer_t<XAM_OVERLAPPED> overlapped_ptr) {
+  auto run = [profile_ptr, flags](uint32_t& extended_error,
+                                  uint32_t& length) -> X_RESULT {
+    X_STATUS result = X_ERROR_SUCCESS;
+
+    extended_error = X_HRESULT_FROM_WIN32(result);
+    length = 0;
+
+    return result;
+  };
+
+  if (!overlapped_ptr) {
+    uint32_t extended_error, length = 0;
+    return run(extended_error, length);
+  } else {
+    kernel_state()->CompleteOverlappedDeferredEx(run, overlapped_ptr);
+    return X_ERROR_IO_PENDING;
+  }
+}
+DECLARE_XAM_EXPORT1(XamUserLogonEx, kUserProfiles, kSketchy);
 
 }  // namespace xam
 }  // namespace kernel

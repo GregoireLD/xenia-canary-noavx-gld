@@ -1,7 +1,13 @@
 include("tools/build")
-require("third_party/premake-export-compile-commands/export-compile-commands")
-require("third_party/premake-androidndk/androidndk")
-require("third_party/premake-cmake/cmake")
+if _ACTION == "export-compile-commands" then
+  require("third_party/premake-export-compile-commands/export-compile-commands")
+end
+if os.istarget("android") then
+  require("third_party/premake-androidndk/androidndk")
+end
+if _ACTION == "cmake" then
+  require("third_party/premake-cmake/cmake")
+end
 
 location(build_root)
 targetdir(build_bin)
@@ -28,7 +34,6 @@ includedirs({
 
 defines({
   "VULKAN_HPP_NO_TO_STRING",
-  "IMGUI_DISABLE_OBSOLETE_FUNCTIONS",
   "IMGUI_DISABLE_DEFAULT_FONT",
   --"IMGUI_USE_WCHAR32",
   "IMGUI_USE_STB_SPRINTF",
@@ -60,6 +65,9 @@ filter("configurations:Checked")
   editandcontinue("Off")
   staticruntime("Off")
   optimize("Off")
+  removedefines({
+    "IMGUI_USE_STB_SPRINTF",
+  })
   defines({
     "DEBUG",
   })
@@ -118,7 +126,7 @@ filter({"configurations:Release", "platforms:Windows"}) -- "toolset:msc"
 filter("platforms:Linux")
   system("linux")
   toolset("clang")
-  vectorextensions("AVX2")
+  vectorextensions("AVX")
   --buildoptions({
   --    "-mlzcnt",   -- (don't) Assume lzcnt is supported.
   --})
@@ -184,6 +192,12 @@ if os.istarget("linux") and string.contains(CLANG_BIN, "clang") then
         "nontrivial-memcall",
       })
   end
+  if tonumber(string.match(os.outputof(CLANG_BIN.." --version"), "version (%d%d)")) >= 21 then
+    filter({"language:C++", "toolset:clang"}) -- "platforms:Linux"
+      disablewarnings({
+        "character-conversion",          -- Needed for utfcpp third-party library
+      })
+  end
 end
 
 filter({"language:C", "toolset:clang or gcc"}) -- "platforms:Linux"
@@ -191,22 +205,24 @@ filter({"language:C", "toolset:clang or gcc"}) -- "platforms:Linux"
     "implicit-function-declaration",
   })
 
-filter("platforms:Android-*")
-  system("android")
-  systemversion("24")
-  cppstl("c++")
-  staticruntime("On")
-  -- Hidden visibility is needed to prevent dynamic relocations in FFmpeg
-  -- AArch64 Neon libavcodec assembly with PIC (accesses extern lookup tables
-  -- using `adrp` and `add`, without the Global Object Table, expecting that all
-  -- FFmpeg symbols that aren't a part of the FFmpeg API are hidden by FFmpeg's
-  -- original build system) by resolving those relocations at link time instead.
-  visibility("Hidden")
-  links({
-    "android",
-    "dl",
-    "log",
-  })
+if os.istarget("android") then
+  filter("platforms:Android-*")
+    system("android")
+    systemversion("24")
+    cppstl("c++")
+    staticruntime("On")
+    -- Hidden visibility is needed to prevent dynamic relocations in FFmpeg
+    -- AArch64 Neon libavcodec assembly with PIC (accesses extern lookup tables
+    -- using `adrp` and `add`, without the Global Object Table, expecting that all
+    -- FFmpeg symbols that aren't a part of the FFmpeg API are hidden by FFmpeg's
+    -- original build system) by resolving those relocations at link time instead.
+    visibility("Hidden")
+    links({
+      "android",
+      "dl",
+      "log",
+    })
+end
 
 filter("platforms:Windows")
   system("windows")
@@ -227,6 +243,7 @@ filter("platforms:Windows")
     "WIN32",
     "_WIN64=1",
     "_AMD64=1",
+    "IMGUI_DISABLE_OBSOLETE_FUNCTIONS",
   })
   linkoptions({
     "/ignore:4006",  -- Ignores complaints about empty obj files.
